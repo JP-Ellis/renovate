@@ -10,11 +10,28 @@ Gem::Specification.new do |spec|
 end
 ```
 
+Renovate also reads declarations that span several lines, constraints given as an array, and the `%q<name>` and `.freeze` forms that RubyGems writes into generated gemspecs:
+
+```ruby
+Gem::Specification.new do |s|
+  s.add_dependency 'activesupport',
+                   '>= 7.0',
+                   '< 8.0'
+  s.add_runtime_dependency(%q<rack>.freeze, ["~> 3.1".freeze])
+end
+```
+
+When Renovate updates a constraint, it rewrites only the parts that change and keeps each part's quotes, `.freeze` call and layout.
+
 ### Lock file updates
 
-When a sibling `Gemfile` loads the `*.gemspec` file with the [`gemspec` directive](https://bundler.io/guides/creating_gem.html) and a sibling `Gemfile.lock` exists, Renovate refreshes the lock file with Bundler after changing a constraint.
-A `gemspec` directive loads the file when its `name:` option is absent or matches the file name, and its `path:` option is absent or `.`.
+When a sibling `Gemfile` loads the `*.gemspec` file with the [`gemspec` directive](https://bundler.io/guides/creating_gem.html), Bundler records the gem in a `PATH` section of the sibling `Gemfile.lock`, with `remote: .`.
+Renovate looks for that entry, matching the gem by the literal `spec.name` in the `*.gemspec` file, or by the file name when the name is not a literal.
+When it finds the entry, Renovate reads each dependency's locked version from the lock file, and refreshes the lock file with Bundler after an update.
 Otherwise, Renovate only updates the `*.gemspec` file.
+
+With the default `rangeStrategy` of `auto`, Renovate updates only the lock file for a release that the current constraint allows, and widens the constraint for one that it does not.
+Without a lock file, Renovate only proposes releases that the current constraint does not allow.
 
 The `gemspec` manager does not perform [lock file maintenance](../../../configuration-options.md#lockfilemaintenance).
 A `gemspec` directive only works inside a `Gemfile`, so the `bundler` manager already maintains the same `Gemfile.lock`.
@@ -43,7 +60,7 @@ else
 end
 ```
 
-Renovate also does _not_ support version constraints built from variables or interpolation, and skips those dependencies:
+Renovate also does _not_ support version constraints built from variables, interpolation or escape sequences, or declarations followed by a modifier such as `if`, and skips those dependencies:
 
 ```ruby
 spec.add_dependency 'foo', "~> #{FooVersion::MAJOR}.0"

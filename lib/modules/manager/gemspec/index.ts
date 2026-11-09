@@ -2,9 +2,11 @@ import type { Category } from '../../../constants/index.ts';
 import { RubygemsDatasource } from '../../datasource/rubygems/index.ts';
 import * as rubyVersioning from '../../versioning/ruby/index.ts';
 
+export { updateLockedDependency } from '../bundler/update-locked.ts';
 export { updateArtifacts } from './artifacts.ts';
 export { knownDepTypes } from './dep-types.ts';
 export { extractPackageFile } from './extract.ts';
+export { updateDependency } from './update.ts';
 
 export const displayName = 'gemspec';
 export const url = 'https://guides.rubygems.org/specification-reference/';

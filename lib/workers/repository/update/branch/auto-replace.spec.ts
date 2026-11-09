@@ -3,11 +3,9 @@ import { Fixtures } from '~test/fixtures.ts';
 import { getConfig } from '../../../../config/defaults.ts';
 import { GlobalConfig } from '../../../../config/global.ts';
 import { WORKER_FILE_UPDATE_FAILED } from '../../../../constants/error-messages.ts';
-import { extractPackageFile as extractGemspec } from '../../../../modules/manager/gemspec/index.ts';
 import { extractPackageFile } from '../../../../modules/manager/html/index.ts';
 import { extractPackageFile as extractMisePackageFile } from '../../../../modules/manager/mise/index.ts';
 import { extractPackageFile as extractRenovateConfigPackageFile } from '../../../../modules/manager/renovate-config/index.ts';
-import { api as rubyVersioning } from '../../../../modules/versioning/ruby/index.ts';
 import type { BranchUpgradeConfig } from '../../../types.ts';
 import { doAutoReplace } from './auto-replace.ts';
 
@@ -525,59 +523,6 @@ describe('workers/repository/update/branch/auto-replace', () => {
           .replace(upgrade.depName, upgrade.newName)
           .replace(upgrade.currentValue, upgrade.newValue),
       );
-    });
-
-    it('bumps a simple gemspec constraint', async () => {
-      const gemspec = codeBlock`
-        Gem::Specification.new do |spec|
-          spec.add_dependency "rails", "~> 6.0"
-        end
-      `;
-      const deps = extractGemspec(gemspec)!.deps;
-      upgrade.manager = 'gemspec';
-      upgrade.baseDeps = deps;
-      upgrade.depName = deps[0].depName;
-      upgrade.currentValue = deps[0].currentValue!;
-      upgrade.newValue = rubyVersioning.getNewValue({
-        currentValue: deps[0].currentValue!,
-        rangeStrategy: 'replace',
-        currentVersion: '6.0.0',
-        newVersion: '7.1.0',
-      })!;
-      upgrade.depIndex = 0;
-      upgrade.packageFile = 'foo.gemspec';
-
-      const res = await doAutoReplace(upgrade, gemspec, reuseExistingBranch);
-
-      expect(upgrade.newValue).toBe('"~> 7.0"');
-      expect(res).toBe(gemspec.replace(upgrade.currentValue, upgrade.newValue));
-    });
-
-    it('bumps multiple parts of a compound gemspec constraint that no longer apply', async () => {
-      const gemspec = codeBlock`
-        Gem::Specification.new do |spec|
-          spec.add_runtime_dependency "activesupport", "~> 4.2", "< 5.5", ">= 4.2.1"
-        end
-      `;
-      const deps = extractGemspec(gemspec)!.deps;
-      upgrade.manager = 'gemspec';
-      upgrade.baseDeps = deps;
-      upgrade.depName = deps[0].depName;
-      upgrade.currentValue = deps[0].currentValue!;
-      upgrade.newValue = rubyVersioning.getNewValue({
-        currentValue: deps[0].currentValue!,
-        rangeStrategy: 'replace',
-        currentVersion: '4.2.1',
-        newVersion: '6.0.0',
-      })!;
-      upgrade.depIndex = 0;
-      upgrade.packageFile = 'foo.gemspec';
-
-      const res = await doAutoReplace(upgrade, gemspec, reuseExistingBranch);
-
-      // ~> and < both fall out of range for 6.0.0; >= 4.2.1 still holds
-      expect(upgrade.newValue).toBe('"~> 6.0", "< 6.0.1", ">= 4.2.1"');
-      expect(res).toBe(gemspec.replace(upgrade.currentValue, upgrade.newValue));
     });
 
     it('updates with cake #addin replacement', async () => {

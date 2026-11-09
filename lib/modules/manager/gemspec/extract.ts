@@ -1,52 +1,49 @@
-import { newlineRegex, regEx } from '../../../util/regex.ts';
 import { RubygemsDatasource } from '../../datasource/rubygems/index.ts';
+import { extractLockFileEntries } from '../bundler/locked-version.ts';
 import type { PackageDependency, PackageFileContent } from '../types.ts';
+import { findGemspecLockFile } from './lockfile.ts';
+import { getRequirementValue, parseGemspec } from './parse.ts';
 
-const methodRegex = regEx(
-  `^\\s*[\\w:.]+\\.add_(?<type>runtime_|development_)?dependency\\s*\\(?\\s*` +
-    `['"](?<depName>[^'"]+)['"]` +
-    `(?<rest>.*)$`,
-);
-
-// One or more comma-separated quoted constraint strings, e.g. `, "~> 4.2", "!= 4.2.5"`
-const constraintsRegex = regEx(/^(?:\s*,\s*['"][^'"]+['"])+$/);
-
-function stripTail(rest: string): string {
-  return rest
-    .replace(regEx(/#.*$/), '') // trailing comment
-    .replace(regEx(/\)\s*$/), '') // closing paren of add_dependency(...)
-    .trimEnd();
-}
-
-export function extractPackageFile(
+export async function extractPackageFile(
   content: string,
-  _packageFile?: string,
-): PackageFileContent | null {
-  const deps: PackageDependency[] = [];
-  for (const line of content.split(newlineRegex)) {
-    const match = methodRegex.exec(line);
-    if (!match?.groups) {
-      continue;
-    }
-    const { type, depName } = match.groups;
-    const dep: PackageDependency = {
-      depName,
-      depType: type === 'development_' ? 'development' : 'runtime',
-      datasource: RubygemsDatasource.id,
-    };
-    const rest = stripTail(match.groups.rest);
-    if (depName.includes('#{')) {
-      dep.skipReason = 'contains-variable';
-    } else if (rest !== '' && constraintsRegex.test(rest)) {
-      // keep the surrounding quotes so ruby versioning can re-quote each part
-      dep.currentValue = rest.replace(regEx(/^\s*,\s*/), '');
-    } else {
-      dep.skipReason = 'unspecified-version';
-    }
-    deps.push(dep);
-  }
+  packageFile?: string,
+): Promise<PackageFileContent | null> {
+  const deps = parseGemspec(content).map(
+    ({ name, depType, requirements }): PackageDependency => {
+      const dep: PackageDependency = {
+        depName: name.value,
+        depType,
+        datasource: RubygemsDatasource.id,
+        fileReplacePosition: name.tokenStart,
+      };
+      if (name.dynamic) {
+        dep.skipReason = 'contains-variable';
+      } else if (requirements) {
+        dep.currentValue = getRequirementValue(requirements);
+      } else {
+        dep.skipReason = 'unspecified-version';
+      }
+      return dep;
+    },
+  );
   if (!deps.length) {
     return null;
   }
-  return { deps };
+  const res: PackageFileContent = { deps };
+
+  if (packageFile) {
+    const lock = await findGemspecLockFile(packageFile, content);
+    if (lock) {
+      res.lockFiles = [lock.lockFile];
+      const lockedVersions = extractLockFileEntries(lock.lockFileContent);
+      for (const dep of deps) {
+        const lockedVersion = lockedVersions.get(dep.depName!);
+        if (lockedVersion) {
+          dep.lockedVersion = lockedVersion;
+        }
+      }
+    }
+  }
+
+  return res;
 }

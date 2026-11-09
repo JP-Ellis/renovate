@@ -13,6 +13,7 @@ import {
   TEMPORARY_ERROR,
 } from '../../../constants/error-messages.ts';
 import { coerceArray } from '../../../util/array.ts';
+import * as memCache from '../../../util/cache/memory/index.ts';
 import * as docker from '../../../util/exec/docker/index.ts';
 import { ExecError } from '../../../util/exec/exec-error.ts';
 import type { StatusResult } from '../../../util/git/types.ts';
@@ -72,6 +73,27 @@ describe('modules/manager/bundler/artifacts', () => {
           config,
         }),
       ).resolves.toBeNull();
+    });
+
+    it('rethrows the error of an earlier failed attempt without running Bundler', async () => {
+      memCache.init();
+      memCache.set('bundlerArtifactsError', BUNDLER_INVALID_CREDENTIALS);
+      const execSnapshots = mockExecAll();
+
+      try {
+        await expect(
+          updateArtifacts({
+            packageFileName: 'Gemfile',
+            updatedDeps: [{ depName: 'foo' }],
+            newPackageFileContent: 'Updated Gemfile content',
+            config,
+          }),
+        ).rejects.toThrow(BUNDLER_INVALID_CREDENTIALS);
+        expect(fs.readLocalFile).not.toHaveBeenCalled();
+        expect(execSnapshots).toBeEmptyArray();
+      } finally {
+        memCache.reset();
+      }
     });
 
     it('returns null if Gemfile.lock was not changed', async () => {

@@ -1,3 +1,4 @@
+import { codeBlock } from 'common-tags';
 import { fs } from '~test/util.ts';
 import * as _lock from '../bundler/lock.ts';
 import type { UpdateArtifact } from '../types.ts';
@@ -15,6 +16,19 @@ const updateArtifact: UpdateArtifact = {
   config: {},
 };
 
+const lockFile = codeBlock`
+  PATH
+    remote: .
+    specs:
+      foo (1.0.0)
+        rack (~> 3.0)
+
+  GEM
+    remote: https://rubygems.org/
+    specs:
+      rack (3.1.8)
+`;
+
 describe('modules/manager/gemspec/artifacts', () => {
   beforeEach(() => {
     fs.getSiblingFileName.mockImplementation(
@@ -23,96 +37,53 @@ describe('modules/manager/gemspec/artifacts', () => {
   });
 
   it('returns null when there is no sibling Gemfile.lock', async () => {
-    fs.localPathExists.mockResolvedValue(false);
-
-    await expect(updateArtifacts(updateArtifact)).resolves.toBeNull();
-    expect(fs.readLocalFile).not.toHaveBeenCalled();
-    expect(lock.runBundlerLock).not.toHaveBeenCalled();
-  });
-
-  it('returns null when there is no sibling Gemfile', async () => {
-    fs.localPathExists.mockResolvedValue(true);
-    fs.readLocalFile.mockResolvedValue(null);
-
-    await expect(updateArtifacts(updateArtifact)).resolves.toBeNull();
-    expect(lock.runBundlerLock).not.toHaveBeenCalled();
-  });
-
-  it('returns null when the Gemfile has no gemspec directive', async () => {
-    fs.localPathExists.mockResolvedValue(true);
-    fs.readLocalFile.mockResolvedValue(
-      "source 'https://rubygems.org'\n# gemspec\ngem 'rack'\n",
-    );
+    fs.readLocalFile.mockResolvedValueOnce(null);
 
     await expect(updateArtifacts(updateArtifact)).resolves.toBeNull();
     expect(lock.runBundlerLock).not.toHaveBeenCalled();
   });
 
   it.each`
-    directive
-    ${"gemspec name: 'bar'"}
-    ${'gemspec :name => "bar"'}
-    ${"gemspec path: 'other'"}
-    ${"gemspec name: 'foo', path: '../foo'"}
+    description                         | lockFileContent
+    ${'a different gem'}                | ${lockFile.replace('foo (1.0.0)', 'bar (1.0.0)')}
+    ${'the gem from another directory'} | ${lockFile.replace('remote: .', 'remote: ../foo')}
   `(
-    'returns null when `$directive` targets a different gemspec',
-    async ({ directive }: { directive: string }) => {
-      fs.localPathExists.mockResolvedValue(true);
-      fs.readLocalFile.mockResolvedValue(
-        `source 'https://rubygems.org'\n\n${directive}\n`,
-      );
+    'returns null when Gemfile.lock locks $description',
+    async ({ lockFileContent }: { lockFileContent: string }) => {
+      fs.readLocalFile.mockResolvedValueOnce(lockFileContent);
 
-      const res = await updateArtifacts(updateArtifact);
-
-      expect(res).toBeNull();
+      await expect(updateArtifacts(updateArtifact)).resolves.toBeNull();
       expect(lock.runBundlerLock).not.toHaveBeenCalled();
     },
   );
 
   it.each`
-    directive
-    ${'gemspec'}
-    ${"gemspec name: 'foo'"}
-    ${'gemspec(:name => "foo", :path => ".")'}
-    ${"gemspec path: './', development_group: :test"}
+    remote
+    ${'.'}
+    ${'./'}
   `(
-    'delegates to runBundlerLock when `$directive` targets the gemspec',
-    async ({ directive }: { directive: string }) => {
-      fs.localPathExists.mockResolvedValue(true);
-      fs.readLocalFile.mockResolvedValue(
-        `source 'https://rubygems.org'\n\n${directive}\n`,
+    'delegates to runBundlerLock when Gemfile.lock locks the gemspec from `$remote`',
+    async ({ remote }: { remote: string }) => {
+      fs.readLocalFile.mockResolvedValueOnce(
+        lockFile.replace('remote: .', `remote: ${remote}`),
       );
-      lock.runBundlerLock.mockResolvedValue(null);
+      const result = [
+        {
+          file: {
+            type: 'addition' as const,
+            path: 'sub/Gemfile.lock',
+            contents: 'x',
+          },
+        },
+      ];
+      lock.runBundlerLock.mockResolvedValueOnce(result);
 
-      await updateArtifacts(updateArtifact);
-
+      await expect(updateArtifacts(updateArtifact)).resolves.toBe(result);
+      expect(fs.readLocalFile).toHaveBeenCalledWith('sub/Gemfile.lock', 'utf8');
       expect(lock.runBundlerLock).toHaveBeenCalledWith(
         updateArtifact,
         'sub/Gemfile.lock',
       );
     },
   );
-
-  it('delegates to runBundlerLock when the Gemfile uses the gemspec directive', async () => {
-    fs.localPathExists.mockResolvedValue(true);
-    fs.readLocalFile.mockResolvedValue(
-      "source 'https://rubygems.org'\n\ngemspec name: 'foo'\n",
-    );
-    const result = [
-      {
-        file: {
-          type: 'addition' as const,
-          path: 'sub/Gemfile.lock',
-          contents: 'x',
-        },
-      },
-    ];
-    lock.runBundlerLock.mockResolvedValue(result);
-
-    await expect(updateArtifacts(updateArtifact)).resolves.toBe(result);
-    expect(lock.runBundlerLock).toHaveBeenCalledWith(
-      updateArtifact,
-      'sub/Gemfile.lock',
-    );
-  });
 });
